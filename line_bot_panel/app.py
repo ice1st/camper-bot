@@ -8,35 +8,33 @@ import requests
 
 app = Flask(__name__)
 
-# กำหนดโฟลเดอร์สำหรับเก็บรูปที่อัปโหลด
 UPLOAD_FOLDER = 'static/uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# ใส่ Channel Access Token ของ LINE Bot คุณที่นี่
 CHANNEL_ACCESS_TOKEN = "YNKog7hkVGIly0K8xwL0Gu7NlozQAAumN3SNqUqzg5YutUyTufgnAF1Sl23iJhWIy4luK6u+KmPFyc/XsZEvK7od/ZzZ0yBM5EBOL09qn10RV8FLwQvhBmZTdZb0ePOGZIA55TYkgQbFreP8jkFkGwdB04t89/1O/w1cDnyilFU="
 
-# ฟังก์ชันสร้างฐานข้อมูลและตารางอัตโนมัติถ้ายังไม่มี
 def init_db():
-    conn = sqlite3.connect('database.db')
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS scheduled_posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id TEXT NOT NULL,
-            message TEXT,
-            image_path TEXT,
-            post_time TEXT NOT NULL,
-            status TEXT DEFAULT 'pending'
-        )
-    """)
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('database.db', timeout=10)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS scheduled_posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id TEXT NOT NULL,
+                message TEXT,
+                image_path TEXT,
+                post_time TEXT NOT NULL,
+                status TEXT DEFAULT 'pending'
+            )
+        """)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Database init error: {e}")
 
-# เรียกใช้งานฟังก์ชันสร้างตารางทันทีที่รันระบบ
 init_db()
 
-# ฟังก์ชันส่งข้อความและรูปภาพเข้า LINE
 def send_line_message(to_id, message, image_url=None):
     url = "https://api.line.me/v2/bot/message/push"
     headers = {
@@ -59,54 +57,64 @@ def send_line_message(to_id, message, image_url=None):
         "to": to_id,
         "messages": messages
     }
-    response = requests.post(url, headers=headers, json=data)
-    return response.json()
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        print(f"LINE API Status Code: {response.status_code}, Response: {response.text}")
+        return response.json()
+    except Exception as e:
+        print(f"LINE API Request failed: {e}")
+        return None
 
-# ฟังก์ชันเบื้องหลังคอยเช็กเวลาส่งโพสต์อัตโนมัติ (เทียบเวลาไทย UTC+7)
+# ระบบเช็กเวลาแบบปลอดภัย ป้องกัน Thread ล่ม
 def background_scheduler():
+    print("Background scheduler started...")
     while True:
         try:
-            init_db() # ตรวจสอบตารางเผื่อกรณีรีเซ็ต
-            conn = sqlite3.connect('database.db')
+            time.sleep(15) # เช็กทุกๆ 15 วินาที
+            init_db()
+            conn = sqlite3.connect('database.db', timeout=10)
             cursor = conn.cursor()
             cursor.execute("SELECT id, group_id, message, image_path, post_time FROM scheduled_posts WHERE status = 'pending'")
             posts = cursor.fetchall()
             conn.close()
+
+            if posts:
+                print(f"พบโพสต์ที่รอส่ง: {len(posts)} รายการ")
 
             now = datetime.utcnow() + timedelta(hours=7)
             
             for post in posts:
                 post_id, group_id, message, image_path, post_time_str = post
                 try:
-                    if 'T' in post_time_str:
-                        post_time = datetime.strptime(post_time_str, '%Y-%m-%dT%H:%M')
-                    else:
+                    # ทำความสะอาดรูปแบบเวลาให้รองรับทุกเคส
+                    post_time_str = post_time_str.replace('T', ' ')
+                    if len(post_time_str) == 16: # กรณีพิมพ์แบบ YYYY-MM-DD HH:MM
                         post_time = datetime.strptime(post_time_str, '%Y-%m-%d %H:%M')
+                    else:
+                        post_time = datetime.strptime(post_time_str[:16], '%Y-%m-%d %H:%M')
                     
                     if now >= post_time:
-                        print(f"ถึงเวลาส่งโพสต์ ID {post_id} กำลังส่ง...")
+                        print(f"ถึงเวลาส่งโพสต์ ID {post_id} กำลังส่ง... (เวลาเป้าหมาย: {post_time}, เวลาปัจจุบัน: {now})")
                         
                         img_url = None
                         if image_path:
                             base_url = "https://camper-bot.onrender.com"
                             img_url = f"{base_url}/{image_path}"
                         
-                        res = send_line_message(group_id, message, img_url)
-                        print(f"LINE API Response: {res}")
+                        send_line_message(group_id, message, img_url)
                         
-                        conn = sqlite3.connect('database.db')
+                        conn = sqlite3.connect('database.db', timeout=10)
                         cursor = conn.cursor()
                         cursor.execute("UPDATE scheduled_posts SET status = 'sent' WHERE id = ?", (post_id,))
                         conn.commit()
                         conn.close()
-                        print(f"ส่งโพสต์ ID {post_id} สำเร็จ!")
-                except Exception as e:
-                    print(f"เกิดข้อผิดพลาดกับโพสต์ ID {post_id}: {e}")
+                        print(f"อัปเดตสถานะโพสต์ ID {post_id} เป็น sent สำเร็จ!")
+                except Exception as ex:
+                    print(f"เกิดข้อผิดพลาดในการประมวลผลโพสต์ ID {post_id}: {ex}")
         except Exception as e:
-            print(f"Background worker error: {e}")
-        
-        time.sleep(10)
+            print(f"Background worker loop error: {e}")
 
+# เริ่มรัน Background Task แบบแยก Thread เดี่ยว
 def start_background_task():
     t = threading.Thread(target=background_scheduler)
     t.daemon = True
@@ -114,11 +122,10 @@ def start_background_task():
 
 start_background_task()
 
-# หน้าเว็บไซต์หลัก
 @app.route('/', methods=['GET', 'POST'])
 def index():
     init_db()
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('database.db', timeout=10)
     cursor = conn.cursor()
     
     if request.method == 'POST':
@@ -140,6 +147,7 @@ def index():
             VALUES (?, ?, ?, ?, 'pending')
         """, (group_id, message, image_path, post_time))
         conn.commit()
+        conn.close()
         return redirect(url_for('index'))
         
     cursor.execute("SELECT id, group_id, message, post_time, status FROM scheduled_posts ORDER BY id DESC")
