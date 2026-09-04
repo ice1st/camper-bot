@@ -3,11 +3,12 @@ import sqlite3
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 
 app = Flask(__name__)
 
+# ใส่ Channel Access Token ของ LINE Bot คุณที่นี่
 CHANNEL_ACCESS_TOKEN = "YNKog7hkVGIly0K8xwL0Gu7NlozQAAumN3SNqUqzg5YutUyTufgnAF1Sl23iJhWIy4luK6u+KmPFyc/XsZEvK7od/ZzZ0yBM5EBOL09qn10RV8FLwQvhBmZTdZb0ePOGZIA55TYkgQbFreP8jkFkGwdB04t89/1O/w1cDnyilFU="
 
 # ฟังก์ชันส่งข้อความเข้า LINE
@@ -28,17 +29,20 @@ def send_line_message(to_id, message, image_path=None):
     response = requests.post(url, headers=headers, json=data)
     return response.json()
 
-# ฟังก์ชันเบื้องหลังคอยเช็กเวลาส่งโพสต์อัตโนมัติ
+# ฟังก์ชันเบื้องหลังคอยเช็กเวลาส่งโพสต์อัตโนมัติ (เทียบเวลาไทย UTC+7)
 def background_scheduler():
     while True:
         try:
+            print("กำลังตรวจสอบคิวโพสต์...")
             conn = sqlite3.connect('database.db')
             cursor = conn.cursor()
             cursor.execute("SELECT id, group_id, message, image_path, post_time FROM scheduled_posts WHERE status = 'pending'")
             posts = cursor.fetchall()
             conn.close()
 
-            now = datetime.now()
+            # แปลงเวลาเซิร์ฟเวอร์ (UTC) ให้เป็นเวลาไทย (+7 ชั่วโมง)
+            now = datetime.utcnow() + timedelta(hours=7)
+            
             for post in posts:
                 post_id, group_id, message, image_path, post_time_str = post
                 try:
@@ -64,7 +68,7 @@ def background_scheduler():
         
         time.sleep(10) # เช็กทุกๆ 10 วินาที
 
-# เริ่มต้นรันระบบเบื้องหลังคู่กับเว็บ
+# เริ่มต้นรันระบบเบื้องหลังคู่กับเว็บอัตโนมัติ
 def start_background_task():
     t = threading.Thread(target=background_scheduler)
     t.daemon = True
