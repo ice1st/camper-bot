@@ -2,41 +2,131 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <title>LINE Bot Control Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camper Memories - ระบบตั้งเวลาโพสต์ LINE</title>
     <style>
-        body { font-family: sans-serif; margin: 40px; background: #f4f7f6; }
-        .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        form { display: flex; flex-direction: column; gap: 15px; }
-        input, textarea { padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
-        button { padding: 10px; background: #00B900; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
-        button:hover { background: #009900; }
-        table { width: 100%; margin-top: 20px; border-collapse: collapse; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background: #f2f2f2; }
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+        h2 {
+            text-align: center;
+            color: #00b900;
+            margin-bottom: 25px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], input[type="datetime-local"], textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        textarea {
+            resize: vertical;
+            height: 100px;
+        }
+        button {
+            background-color: #00b900;
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background-color: #009900;
+        }
+        hr {
+            margin: 30px 0;
+            border: 0;
+            border-top: 1px solid #eee;
+        }
+        h3 {
+            color: #444;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            border: 1px solid #e0e0e0;
+            padding: 12px;
+            text-align: left;
+            font-size: 14px;
+        }
+        th {
+            background-color: #f8f9fa;
+            color: #333;
+        }
+        tr:nth-child(even) {
+            background-color: #fafafa;
+        }
+        .status-pending {
+            color: #e67e22;
+            font-weight: bold;
+        }
+        .status-sent {
+            color: #27ae60;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h2>🤖 ระบบตั้งเวลาโพสต์ Camper Bot</h2>
-        
-        <form method="POST" enctype="multipart/form-data">
-            <label>LINE Group ID (รหัสกลุ่มปลายทาง):</label>
-            <input type="text" name="group_id" placeholder="เช่น Cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required>
-            
-            <label>ข้อความ:</label>
-            <textarea name="message" rows="4" placeholder="พิมพ์ข้อความที่ต้องการส่ง..." required></textarea>
-            
-            <label>รูปภาพ (ถ้ามี):</label>
-            <input type="file" name="image" accept="image/*">
-            
-            <label>เวลาที่จะให้ส่ง:</label>
-            <input type="datetime-local" name="post_time" required>
-            
-            <button type="submit">บันทึกคิวโพสต์</button>
-        </form>
 
-        <h3 style="margin-top: 30px;">📋 ประวัติและคิวโพสต์ทั้งหมด</h3>
-        <table>
+<div class="container">
+    <h2>🏕️ Camper Memories - ระบบตั้งเวลาโพสต์ LINE</h2>
+    
+    <!-- ฟอร์มสำหรับสร้างคิวโพสต์ -->
+    <form method="POST">
+        <div class="form-group">
+            <label for="group_id">Group ID:</label>
+            <input type="text" id="group_id" name="group_id" value="C6a472edb8a62eba27b5c42c346492017" required>
+        </div>
+
+        <div class="form-group">
+            <label for="message">ข้อความที่ต้องการส่ง:</label>
+            <textarea id="message" name="message" placeholder="พิมพ์ข้อความที่ต้องการส่ง..." required></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="post_time">เวลาที่จะให้ส่ง:</label>
+            <input type="datetime-local" id="post_time" name="post_time" required>
+        </div>
+
+        <button type="submit">บันทึกคิวโพสต์</button>
+    </form>
+
+    <hr>
+
+    <h3>📋 ประวัติและคิวโพสต์ทั้งหมด</h3>
+    <table>
+        <thead>
             <tr>
                 <th>ID</th>
                 <th>Group ID</th>
@@ -44,16 +134,26 @@
                 <th>เวลาโพสต์</th>
                 <th>สถานะ</th>
             </tr>
+        </thead>
+        <tbody>
             {% for post in posts %}
             <tr>
                 <td>{{ post[0] }}</td>
                 <td>{{ post[1] }}</td>
                 <td>{{ post[2] }}</td>
-                <td>{{ post[4] }}</td>
-                <td>{{ post[5] }}</td>
+                <td>{{ post[3] }}</td> <!-- เวลาโพสต์ -->
+                <td>
+                    {% if post[4] == 'sent' %}
+                        <span class="status-sent">sent</span>
+                    {% else %}
+                        <span class="status-pending">pending</span>
+                    {% endif %}
+                </td> <!-- สถานะ -->
             </tr>
             {% endfor %}
-        </table>
-    </div>
+        </tbody>
+    </table>
+</div>
+
 </body>
 </html>
