@@ -8,17 +8,31 @@ import requests
 
 app = Flask(__name__)
 
+# กำหนดโฟลเดอร์สำหรับเก็บรูปที่อัปโหลด
+UPLOAD_FOLDER = 'static/uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
 # ใส่ Channel Access Token ของ LINE Bot คุณที่นี่
 CHANNEL_ACCESS_TOKEN = "YNKog7hkVGIly0K8xwL0Gu7NlozQAAumN3SNqUqzg5YutUyTufgnAF1Sl23iJhWIy4luK6u+KmPFyc/XsZEvK7od/ZzZ0yBM5EBOL09qn10RV8FLwQvhBmZTdZb0ePOGZIA55TYkgQbFreP8jkFkGwdB04t89/1O/w1cDnyilFU="
 
-# ฟังก์ชันส่งข้อความเข้า LINE
-def send_line_message(to_id, message, image_path=None):
+# ฟังก์ชันส่งข้อความและรูปภาพเข้า LINE
+def send_line_message(to_id, message, image_url=None):
     url = "https://api.line.me/v2/bot/message/push"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}"
     }
     messages = []
+    
+    # ถ้ามีรูปภาพ ให้แนบประเภท image ไปด้วย (ต้องเป็นลิงก์ URL จริง)
+    if image_url:
+        messages.append({
+            "type": "image",
+            "originalContentUrl": image_url,
+            "previewImageUrl": image_url
+        })
+        
     if message:
         messages.append({"type": "text", "text": message})
     
@@ -40,7 +54,6 @@ def background_scheduler():
             posts = cursor.fetchall()
             conn.close()
 
-            # แปลงเวลาเซิร์ฟเวอร์ (UTC) ให้เป็นเวลาไทย (+7 ชั่วโมง)
             now = datetime.utcnow() + timedelta(hours=7)
             
             for post in posts:
@@ -53,7 +66,15 @@ def background_scheduler():
                     
                     if now >= post_time:
                         print(f"ถึงเวลาส่งโพสต์ ID {post_id} กำลังส่ง...")
-                        send_line_message(group_id, message, image_path)
+                        
+                        # แปลง path รูปให้เป็น Public URL ของ Render
+                        img_url = None
+                        if image_path:
+                            # เปลี่ยน URL ตรงนี้ให้ตรงกับชื่อเว็บ Render ของคุณจริงๆ
+                            base_url = "https://camper-bot.onrender.com"
+                            img_url = f"{base_url}/{image_path}"
+                        
+                        send_line_message(group_id, message, img_url)
                         
                         conn = sqlite3.connect('database.db')
                         cursor = conn.cursor()
@@ -66,9 +87,8 @@ def background_scheduler():
         except Exception as e:
             print(f"Background worker error: {e}")
         
-        time.sleep(10) # เช็กทุกๆ 10 วินาที
+        time.sleep(10)
 
-# เริ่มต้นรันระบบเบื้องหลังคู่กับเว็บอัตโนมัติ
 def start_background_task():
     t = threading.Thread(target=background_scheduler)
     t.daemon = True
@@ -87,10 +107,20 @@ def index():
         message = request.form.get('message')
         post_time = request.form.get('post_time')
         
+        # จัดการอัปโหลดไฟล์รูปภาพ
+        image_path = None
+        if 'image' in request.files:
+            file = request.files['image']
+            if file and file.filename != '':
+                filename = file.filename
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                image_path = file_path # บันทึก path เช่น static/uploads/xxx.jpg
+        
         cursor.execute("""
             INSERT INTO scheduled_posts (group_id, message, image_path, post_time, status)
             VALUES (?, ?, ?, ?, 'pending')
-        """, (group_id, message, None, post_time))
+        """, (group_id, message, image_path, post_time))
         conn.commit()
         return redirect(url_for('index'))
         
