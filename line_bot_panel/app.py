@@ -1,105 +1,100 @@
-from flask import Flask, render_template, request, abort, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for
 import sqlite3
 import os
+import threading
+import time
+from datetime import datetime
 import requests
 
 app = Flask(__name__)
 
-UPLOAD_FOLDER = 'static/uploads'
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-# ใส่ Channel Access Token ตัวเดิมของคุณตรงนี้
 CHANNEL_ACCESS_TOKEN = "YNKog7hkVGIly0K8xwL0Gu7NlozQAAumN3SNqUqzg5YutUyTufgnAF1Sl23iJhWIy4luK6u+KmPFyc/XsZEvK7od/ZzZ0yBM5EBOL09qn10RV8FLwQvhBmZTdZb0ePOGZIA55TYkgQbFreP8jkFkGwdB04t89/1O/w1cDnyilFU="
 
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-
-def init_db():
-    conn = sqlite3.connect('database.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS scheduled_posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id TEXT,
-            message TEXT,
-            image_path TEXT,
-            post_time TEXT,
-            status TEXT DEFAULT 'pending'
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def send_line_message(to_id, message):
+# ฟังก์ชันส่งข้อความเข้า LINE
+def send_line_message(to_id, message, image_path=None):
     url = "https://api.line.me/v2/bot/message/push"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}"
     }
+    messages = []
+    if message:
+        messages.append({"type": "text", "text": message})
+    
     data = {
         "to": to_id,
-        "messages": [{"type": "text", "text": message}]
+        "messages": messages
     }
-    requests.post(url, headers=headers, json=data)
+    response = requests.post(url, headers=headers, json=data)
+    return response.json()
 
-# ฟังก์ชันรับ Webhook จาก LINE (เวลาใครพิมพ์อะไร หรือดึงบอทเข้ากลุ่ม)
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    body = request.get_json()
-    if not body:
-        return abort(400)
-    
-    events = body.get('events', [])
-    for event in events:
-        if event.get('type') == 'message':
-            source = event.get('source', {})
-            source_type = source.get('type')
-            
-            # ถ้าพิมพ์ในกลุ่ม หรือห้องแชต
-            if source_type in ['group', 'room']:
-                chat_id = source.get('groupId') or source.get('roomId')
-                user_message = event.get('message', {}).get('text', '')
-                
-                # ถ้าพิมพ์คำว่า "id" หรือ "ไอดี" ให้บอทตอบ Group ID กลับทันที
-                if user_message.lower() in ['id', 'ไอดี', 'group id']:
-                    send_line_message(chat_id, f"📌 Group ID ของกลุ่มนี้คือ:\n{chat_id}")
+# ฟังก์ชันเบื้องหลังคอยเช็กเวลาส่งโพสต์อัตโนมัติ
+def background_scheduler():
+    while True:
+        try:
+            conn = sqlite3.connect('database.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, group_id, message, image_path, post_time FROM scheduled_posts WHERE status = 'pending'")
+            posts = cursor.fetchall()
+            conn.close()
+
+            now = datetime.now()
+            for post in posts:
+                post_id, group_id, message, image_path, post_time_str = post
+                try:
+                    if 'T' in post_time_str:
+                        post_time = datetime.strptime(post_time_str, '%Y-%m-%dT%H:%M')
+                    else:
+                        post_time = datetime.strptime(post_time_str, '%Y-%m-%d %H:%M')
                     
-    return 'OK', 200
+                    if now >= post_time:
+                        print(f"ถึงเวลาส่งโพสต์ ID {post_id} กำลังส่ง...")
+                        send_line_message(group_id, message, image_path)
+                        
+                        conn = sqlite3.connect('database.db')
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE scheduled_posts SET status = 'sent' WHERE id = ?", (post_id,))
+                        conn.commit()
+                        conn.close()
+                        print(f"ส่งโพสต์ ID {post_id} สำเร็จ!")
+                except Exception as e:
+                    print(f"เกิดข้อผิดพลาดกับโพสต์ ID {post_id}: {e}")
+        except Exception as e:
+            print(f"Background worker error: {e}")
+        
+        time.sleep(10) # เช็กทุกๆ 10 วินาที
 
+# เริ่มต้นรันระบบเบื้องหลังคู่กับเว็บ
+def start_background_task():
+    t = threading.Thread(target=background_scheduler)
+    t.daemon = True
+    t.start()
+
+start_background_task()
+
+# หน้าเว็บไซต์หลัก
 @app.route('/', methods=['GET', 'POST'])
 def index():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
     
     if request.method == 'POST':
-        group_id = request.form.get('group_id')
+        group_id = request.form.get('group_id', 'C6a472edb8a62eba27b5c42c346492017')
         message = request.form.get('message')
         post_time = request.form.get('post_time')
         
-        image_file = request.files.get('image')
-        image_path = None
-        
-        if image_file and image_file.filename != '':
-            image_filename = image_file.filename
-            image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_filename)
-            image_file.save(image_path)
-            image_path = image_path.replace('\\', '/')
-            
-        cursor.execute('''
-            INSERT INTO scheduled_posts (group_id, message, image_path, post_time) 
-            VALUES (?, ?, ?, ?)
-        ''', (group_id, message, image_path, post_time))
-        
+        cursor.execute("""
+            INSERT INTO scheduled_posts (group_id, message, image_path, post_time, status)
+            VALUES (?, ?, ?, ?, 'pending')
+        """, (group_id, message, None, post_time))
         conn.commit()
-        conn.close()
         return redirect(url_for('index'))
-    
-    cursor.execute('SELECT * FROM scheduled_posts ORDER BY id DESC')
+        
+    cursor.execute("SELECT id, group_id, message, post_time, status FROM scheduled_posts ORDER BY id DESC")
     posts = cursor.fetchall()
     conn.close()
     
     return render_template('index.html', posts=posts)
 
 if __name__ == '__main__':
-    init_db()
-    app.run(debug=True, port=5000)
+    app.run(host='0.0.0.0', port=5000)
