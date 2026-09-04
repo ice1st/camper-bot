@@ -16,6 +16,26 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # ใส่ Channel Access Token ของ LINE Bot คุณที่นี่
 CHANNEL_ACCESS_TOKEN = "YNKog7hkVGIly0K8xwL0Gu7NlozQAAumN3SNqUqzg5YutUyTufgnAF1Sl23iJhWIy4luK6u+KmPFyc/XsZEvK7od/ZzZ0yBM5EBOL09qn10RV8FLwQvhBmZTdZb0ePOGZIA55TYkgQbFreP8jkFkGwdB04t89/1O/w1cDnyilFU="
 
+# ฟังก์ชันสร้างฐานข้อมูลและตารางอัตโนมัติถ้ายังไม่มี
+def init_db():
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scheduled_posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id TEXT NOT NULL,
+            message TEXT,
+            image_path TEXT,
+            post_time TEXT NOT NULL,
+            status TEXT DEFAULT 'pending'
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+# เรียกใช้งานฟังก์ชันสร้างตารางทันทีที่รันระบบ
+init_db()
+
 # ฟังก์ชันส่งข้อความและรูปภาพเข้า LINE
 def send_line_message(to_id, message, image_url=None):
     url = "https://api.line.me/v2/bot/message/push"
@@ -25,7 +45,6 @@ def send_line_message(to_id, message, image_url=None):
     }
     messages = []
     
-    # ถ้ามีรูปภาพ ให้แนบประเภท image ไปด้วย (ต้องเป็นลิงก์ URL จริง)
     if image_url:
         messages.append({
             "type": "image",
@@ -47,7 +66,7 @@ def send_line_message(to_id, message, image_url=None):
 def background_scheduler():
     while True:
         try:
-            print("กำลังตรวจสอบคิวโพสต์...")
+            init_db() # ตรวจสอบตารางเผื่อกรณีรีเซ็ต
             conn = sqlite3.connect('database.db')
             cursor = conn.cursor()
             cursor.execute("SELECT id, group_id, message, image_path, post_time FROM scheduled_posts WHERE status = 'pending'")
@@ -67,14 +86,13 @@ def background_scheduler():
                     if now >= post_time:
                         print(f"ถึงเวลาส่งโพสต์ ID {post_id} กำลังส่ง...")
                         
-                        # แปลง path รูปให้เป็น Public URL ของ Render
                         img_url = None
                         if image_path:
-                            # เปลี่ยน URL ตรงนี้ให้ตรงกับชื่อเว็บ Render ของคุณจริงๆ
                             base_url = "https://camper-bot.onrender.com"
                             img_url = f"{base_url}/{image_path}"
                         
-                        send_line_message(group_id, message, img_url)
+                        res = send_line_message(group_id, message, img_url)
+                        print(f"LINE API Response: {res}")
                         
                         conn = sqlite3.connect('database.db')
                         cursor = conn.cursor()
@@ -99,6 +117,7 @@ start_background_task()
 # หน้าเว็บไซต์หลัก
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    init_db()
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
     
@@ -107,7 +126,6 @@ def index():
         message = request.form.get('message')
         post_time = request.form.get('post_time')
         
-        # จัดการอัปโหลดไฟล์รูปภาพ
         image_path = None
         if 'image' in request.files:
             file = request.files['image']
@@ -115,7 +133,7 @@ def index():
                 filename = file.filename
                 file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 file.save(file_path)
-                image_path = file_path # บันทึก path เช่น static/uploads/xxx.jpg
+                image_path = file_path
         
         cursor.execute("""
             INSERT INTO scheduled_posts (group_id, message, image_path, post_time, status)
