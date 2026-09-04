@@ -5,10 +5,12 @@ import threading
 import time
 from datetime import datetime, timedelta
 import requests
+import uuid
+import re
 
 app = Flask(__name__)
 
-# ใช้ Railway Volume ที่ mount ไว้ที่ /app/data เพื่อความปลอดภัย ข้อมูลไม่หาย 100%
+# ใช้ Railway Volume ที่ mount ไว้ที่ /app/data เพื่อความปลอดภัย ข้อมูลไม่หาย
 DATA_DIR = '/app/data'
 if not os.path.exists(DATA_DIR):
     DATA_DIR = '.' # Fallback สำหรับรันเทสบนเครื่อง Local
@@ -26,7 +28,6 @@ def init_db():
     try:
         conn = sqlite3.connect(DB_PATH, timeout=10)
         cursor = conn.cursor()
-        # ตารางเก็บคิวโพสต์
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS scheduled_posts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,7 +38,6 @@ def init_db():
                 status TEXT DEFAULT 'pending'
             )
         """)
-        # ตารางเก็บคลังรูปภาพ
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS gallery (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +51,11 @@ def init_db():
         print(f"Database init error: {e}")
 
 init_db()
+
+def clean_filename(original_filename):
+    # ตัดช่องว่างและตัวอักษรพิเศษออก ป้องกันปัญหา URL พังตอนส่ง LINE
+    ext = os.path.splitext(original_filename)[1]
+    return f"{uuid.uuid4().hex}{ext}"
 
 def send_line_message(to_id, message, image_url=None):
     url = "https://api.line.me/v2/bot/message/push"
@@ -82,21 +87,17 @@ def send_line_message(to_id, message, image_url=None):
         print(f"LINE API Request failed: {e}")
         return None
 
-# ระบบเช็กเวลาแบบปลอดภัย ป้องกัน Thread ล่ม
 def background_scheduler():
     print("Background scheduler started...")
     while True:
         try:
-            time.sleep(15) # เช็กทุกๆ 15 วินาที
+            time.sleep(15)
             init_db()
             conn = sqlite3.connect(DB_PATH, timeout=10)
             cursor = conn.cursor()
             cursor.execute("SELECT id, group_id, message, image_path, post_time FROM scheduled_posts WHERE status = 'pending'")
             posts = cursor.fetchall()
             conn.close()
-
-            if posts:
-                print(f"พบโพสต์ที่รอส่ง: {len(posts)} รายการ")
 
             now = datetime.utcnow() + timedelta(hours=7)
             
@@ -139,7 +140,6 @@ def start_background_task():
 
 start_background_task()
 
-# Route สำหรับดึงรูปภาพจาก Volume มาแสดงผล
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
@@ -153,12 +153,11 @@ def index():
     if request.method == 'POST':
         action = request.form.get('action', 'schedule')
         
-        # 1. อัปโหลดรูปเข้าคลังภาพอย่างเดียว
         if action == 'upload_gallery':
             if 'image' in request.files:
                 file = request.files['image']
                 if file and file.filename != '':
-                    filename = f"{int(time.time())}_{file.filename}"
+                    filename = clean_filename(file.filename)
                     file_path = os.path.join(UPLOAD_FOLDER, filename)
                     file.save(file_path)
                     
@@ -167,7 +166,6 @@ def index():
             conn.close()
             return redirect(url_for('index'))
             
-        # 2. ตั้งเวลาโพสต์ (เลือกรูปจากคลัง หรืออัปโหลดใหม่)
         elif action == 'schedule':
             group_id = request.form.get('group_id', 'C6a472edb8a62eba27b5c42c346492017')
             message = request.form.get('message')
@@ -180,7 +178,7 @@ def index():
             if 'image' in request.files:
                 file = request.files['image']
                 if file and file.filename != '':
-                    filename = f"{int(time.time())}_{file.filename}"
+                    filename = clean_filename(file.filename)
                     file_path = os.path.join(UPLOAD_FOLDER, filename)
                     file.save(file_path)
                     image_filename = filename
@@ -204,7 +202,6 @@ def index():
     
     return render_template('index.html', posts=posts, gallery_images=gallery_images)
 
-# Route สำหรับลบรูปภาพออกจากคลังและลบไฟล์จริง
 @app.route('/delete-image/<int:img_id>', methods=['POST'])
 def delete_image(img_id):
     init_db()
