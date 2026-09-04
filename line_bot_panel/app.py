@@ -113,10 +113,12 @@ def background_scheduler():
                         print(f"ถึงเวลาส่งโพสต์ ID {post_id} กำลังส่ง...")
                         
                         img_url = None
-                        if image_path:
-                            filename = os.path.basename(image_path)
-                            img_url = f"{RAILWAY_DOMAIN}/uploads/{filename}"
+                        if image_path and str(image_path).strip() and str(image_path).lower() != 'none':
+                            filename = os.path.basename(str(image_path).strip())
+                            if filename and filename.lower() != 'none':
+                                img_url = f"{RAILWAY_DOMAIN}/uploads/{filename}"
                         
+                        print(f"DEBUG Image URL to send: {img_url}")
                         send_line_message(group_id, message, img_url)
                         
                         conn = sqlite3.connect(DB_PATH, timeout=10)
@@ -171,7 +173,9 @@ def index():
             message = request.form.get('message')
             post_time = request.form.get('post_time')
             
-            image_filename = request.form.get('selected_gallery_image') # รูปที่เลือกจากคลัง
+            image_filename = request.form.get('selected_gallery_image')
+            if not image_filename or image_filename.strip() == '' or image_filename.lower() == 'none':
+                image_filename = None
             
             if 'image' in request.files:
                 file = request.files['image']
