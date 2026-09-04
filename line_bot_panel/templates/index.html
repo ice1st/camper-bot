@@ -34,7 +34,7 @@
             font-weight: bold;
             color: #555;
         }
-        input[type="text"], input[type="datetime-local"], textarea {
+        input[type="text"], input[type="datetime-local"], input[type="file"], textarea {
             width: 100%;
             padding: 12px;
             border: 1px solid #ddd;
@@ -102,8 +102,8 @@
 <div class="container">
     <h2>🏕️ Camper Memories - ระบบตั้งเวลาโพสต์ LINE</h2>
     
-    <!-- ฟอร์มสำหรับสร้างคิวโพสต์ -->
-    <form method="POST">
+    <!-- ฟอร์มสร้างคิวโพสต์ รองรับการอัปโหลดรูปภาพ -->
+    <form method="POST" enctype="multipart/form-data">
         <div class="form-group">
             <label for="group_id">Group ID:</label>
             <input type="text" id="group_id" name="group_id" value="C6a472edb8a62eba27b5c42c346492017" required>
@@ -111,7 +111,12 @@
 
         <div class="form-group">
             <label for="message">ข้อความที่ต้องการส่ง:</label>
-            <textarea id="message" name="message" placeholder="พิมพ์ข้อความที่ต้องการส่ง..." required></textarea>
+            <textarea id="message" name="message" placeholder="พิมพ์ข้อความที่ต้องการส่ง..."></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="image">รูปภาพ (ถ้ามี):</label>
+            <input type="file" id="image" name="image" accept="image/*">
         </div>
 
         <div class="form-group">
@@ -141,14 +146,14 @@
                 <td>{{ post[0] }}</td>
                 <td>{{ post[1] }}</td>
                 <td>{{ post[2] }}</td>
-                <td>{{ post[3] }}</td> <!-- เวลาโพสต์ -->
+                <td>{{ post[3] }}</td>
                 <td>
                     {% if post[4] == 'sent' %}
                         <span class="status-sent">sent</span>
                     {% else %}
                         <span class="status-pending">pending</span>
                     {% endif %}
-                </td> <!-- สถานะ -->
+                </td>
             </tr>
             {% endfor %}
         </tbody>
